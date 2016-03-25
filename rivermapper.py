@@ -161,12 +161,27 @@ print("Generating image data")
 
 contrast = simpledialog.askfloat("Contrast", "Contrast of the image:\nThe higher it is, the more visible are the small rivers.", initialvalue=3.0, parent=master, minvalue=0)
 
+depth = simpledialog.askinteger("Bit depth", "Bit depth of the river image:\nPossible values are 8, 16, 32, 64.", initialvalue=8, parent=master, minvalue=8, maxvalue=64)
+if depth <= 8:
+	depth = 8
+	typecode = "B"
+elif depth <= 16:
+	depth = 16
+	typecode = "H"
+elif depth <= 32:
+	depth = 32
+	typecode = "L"
+else:
+	depth = 64
+	typecode = "Q"
+
+maxvalue = 2 ** depth - 1
 power = 1 / contrast
-coeff = 65535 / (maxwater ** power - 1)
+coeff = maxvalue / (maxwater ** power - 1)
 	
-rawdata = array("H")
+rawdata = array(typecode)
 for i in range(size):
-	value = min(ceil((waterlist[i] ** power - 1) * coeff), 65535)
+	value = min(ceil((waterlist[i] ** power - 1) * coeff), maxvalue)
 	rawdata.append(value)
 
 waterlist = None
@@ -177,7 +192,7 @@ rawdata = rawdata.tobytes()
 
 print("Generating image")
 
-img = Image(blob=rawdata, width=W, height=H, format="gray", depth=16)
+img = Image(blob=rawdata, width=W, height=H, format="gray", depth=depth)
 print("Converting image")
 img.convert("tiff")
 print("Asking output file")
