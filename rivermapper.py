@@ -5,8 +5,6 @@ import sys
 import numpy as np
 import imageio
 
-print(sys.argv)
-
 file_input = None
 file_output = None
 
@@ -14,7 +12,7 @@ n_args = len(sys.argv)
 i = 1
 n = 1
 sea_level = -128
-seed = 0
+seed = None
 contrast = 3
 bit_depth = 8
 while i < n_args:
@@ -63,8 +61,8 @@ if not file_input:
 if not file_output:
 	raise ValueError("No filename given for output")
 
-print(file_input)
-print(file_output)
+if seed:
+	numpy.random.seed(seed=seed)
 
 sys.setrecursionlimit(65536)
 
@@ -92,7 +90,7 @@ for x in range(1, X-1):
 			continue
 		to_explore += 1
 		if to_explore % 1000000 == 0:
-			print(str(to_explore // 1000000) + " millions flowable points found")
+			print("Found", str(to_explore // 1000000), "millions points to explore")
 		if (heightmap[x-1, y] <= sea_level or heightmap[x+1, y] <= sea_level or heightmap[x, y-1] <= sea_level or heightmap[x, y+1] <= sea_level):
 			add_start_point(x, y)
 
