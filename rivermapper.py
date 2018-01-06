@@ -1,96 +1,115 @@
-from wand.image import Image
+#!/usr/bin/env python3
+
 from heapq import heappush, heappop, heapify
-from random import *
-from tkinter import simpledialog, filedialog, messagebox, Tk
 import sys
-from math import sqrt, ceil
-from array import array
+import numpy as np
+import imageio
 
-master = Tk()
+print(sys.argv)
 
-print("Asking input file")
-fname = filedialog.askopenfilename(parent=master, title="Input image")
+file_input = None
+file_output = None
+
+n_args = len(sys.argv)
+i = 1
+n = 1
+sea_level = -128
+seed = 0
+contrast = 3
+bit_depth = 8
+while i < n_args:
+	arg = sys.argv[i]
+	if len(arg) == 0:
+		i += 1
+		continue
+	if arg[0] == "-":
+		l = arg[1]
+		if l == "l":
+			sea_level = int(sys.argv[i+1])
+			i += 2
+			continue
+		if l == "s":
+			seed = int(sys.argv[i+1])
+			i += 2
+			continue
+		if l == "c":
+			contrast = float(sys.argv[i+1])
+			i += 2
+			continue
+		if l == "d":
+			bit_depth = int(sys.argv[i+1])
+			i += 2
+			continue
+		if l == "i":
+			file_input = sys.argv[i+1]
+			i += 2
+			continue
+		if l == "o":
+			file_output = sys.argv[i+1]
+			i += 2
+			continue
+	else:
+		if n == 2:
+			file_output = arg
+			n += 1
+		if n == 1:
+			file_input = arg
+			n += 1
+	i += 1
+
+if not file_input:
+	raise ValueError("No filename given for input")
+
+if not file_output:
+	raise ValueError("No filename given for output")
+
+print(file_input)
+print(file_output)
 
 sys.setrecursionlimit(65536)
 
 print("Reading image")
-with Image(filename=fname) as img:
-	blob = img.make_blob("gray")
-	W = img.width
-	H = img.height
-	size = W * H
-	signed = messagebox.askyesno("Signed image", "Is the image signed?")
-	depth = img.depth
-
-if messagebox.askyesno("Seed", "Use custom random seed?"):
-	cseed = simpledialog.askstring("Seed", "Enter the seed. All characters are accepted.\nThe use of the random is to place rivers randomly where the data do not allow to trace the river (too flat)")
-	seed(a=cseed)
-
-if depth == 8:
-	typecode = "B"
-elif depth == 16:
-	typecode = "H"
-elif depth == 32:
-	typecode = "L"
-elif depth == 64:
-	typecode = "Q"
-
-if signed:
-	typecode = typecode.lower()
-
-pixels = array(typecode, blob)
-
-blob = None
+heightmap = np.array(imageio.imread(file_input))
+shape = heightmap.shape
+(X, Y) = shape
 
 print("Finding start points")
 
-visited = [False for i in range(size)]
+
+visited = np.zeros(shape, dtype=bool)
 
 start_points = []
 
-def add_start_point(i):
-	start_points.append((pixels[i] + random(), i))
-	visited[i] = True
-
-initial_sea_level = 0
-if signed:
-	initial_sea_level = -(2 ** (depth-1))
-
-SEA = simpledialog.askinteger("Sea level", "Sea level:", initialvalue=initial_sea_level, parent=master, minvalue=initial_sea_level)
-SEA = SEA or float("-inf")
+def add_start_point(x, y):
+	start_points.append((heightmap[x, y] + np.random.random(), x, y))
+	visited[x, y] = True
 
 to_explore = 0
 
-for x in range(1, W-1):
-	for y in range(1, H-1):
-		i = y * W + x
-		if pixels[i] <= SEA:
+for x in range(1, X-1):
+	for y in range(1, Y-1):
+		if heightmap[x, y] <= sea_level:
 			continue
 		to_explore += 1
-		if (pixels[i-1] <= SEA or pixels[i+1] <= SEA or pixels[i-W] <= SEA or pixels[i+W] <= SEA):
-			add_start_point(i)
+		if to_explore % 1000000 == 0:
+			print(str(to_explore // 1000000) + " millions flowable points found")
+		if (heightmap[x-1, y] <= sea_level or heightmap[x+1, y] <= sea_level or heightmap[x, y-1] <= sea_level or heightmap[x, y+1] <= sea_level):
+			add_start_point(x, y)
 
-length_x = size - W
-length_y = W - 1
-
-for x in range(1, W-1):
-	i = x
-	if pixels[i] > SEA:
-		add_start_point(i)
+for x in range(X):
+	if heightmap[x, 0] > sea_level:
+		add_start_point(x, 0)
 		to_explore += 1
-	i += length_x
-	if pixels[i] > SEA:
-		add_start_point(i)
+	if heightmap[x, -1] > sea_level:
+		add_start_point(x, Y-1)
 		to_explore += 1
 
-for y in range(1, H-1):
-	i = y * W
-	if pixels[i] > SEA:
-		add_start_point(i)
+for y in range(1, Y-1):
+	if heightmap[0, y] > sea_level:
+		add_start_point(0, y)
 		to_explore += 1
-	i += length_y
-	if pixels[i] > SEA:
-		add_start_point(i)
+	if heightmap[-1, y] > sea_level:
+		add_start_point(X-1, y)
 		to_explore += 1
 
 print("Found", str(len(start_points)), "start points")
@@ -100,102 +119,97 @@ heapify(heap)
 
 print("Building river trees:", str(to_explore), "points to visit")
 
-links = array("l", range(size))
+flow_dirs = np.zeros(shape, dtype=np.int8)
 
-def try_push(i1, i2):
-	if not visited[i2]:
-		px = pixels[i2]
-		if px > SEA:
-			heappush(heap, (px + random(), i2))
-			links[i2] = i1
-			visited[i2] = True
+# Directions:
+#	1: +x
+#	2: +y
+#	4: -x
+#	8: -y
 
-def process_neighbors(i):
-	x, y = i % W, i // W
-	if x > 0:
-		try_push(i, i-1)
-	if x < W-1:
-		try_push(i, i+1)
-	if y > 0:
-		try_push(i, i-W)
-	if y < H-1:
-		try_push(i, i+W)
+def try_push(x, y): # try_push does 2 things at once: returning whether water can flow, and push the upward position in heap if yes.
+	if not visited[x, y]:
+		h = heightmap[x, y]
+		if h > sea_level:
+			heappush(heap, (h + np.random.random(), x, y))
+			visited[x, y] = True
+			return True
+	return False
+
+def process_neighbors(x, y):
+	dirs = 0
+	if x > 0 and try_push(x-1, y):
+		dirs+= 1
+	if y > 0 and try_push(x, y-1):
+		dirs += 2
+	if x < X-1 and try_push(x+1, y):
+		dirs += 4
+	if y < Y-1 and try_push(x, y+1):
+		dirs += 8
+	flow_dirs[x, y] = dirs
 
 while len(heap) > 0:
 	t = heappop(heap)
 	to_explore -= 1
 	if to_explore % 1000000 == 0:
 		print(str(to_explore // 1000000), "million points left", "Altitude:", int(t[0]), "Queue:", len(heap))
-	process_neighbors(t[1])
+	process_neighbors(t[1], t[2])
 
 visited = None
-pixels = None
+heightmap = None
 
 print("Calculating water quantity")
 
-neighbors = [-W, -1, 1, W]
-waterlist = array("L", [1 for i in range(size)])
+waterq = np.ones(shape)
 
-def set_water(i):
+def set_water(x, y):
 	water = 1
-	for neighbor in neighbors:
-		i2 = i + neighbor
-		if i2 < 0 or i2 >= size:
-			continue
-		if links[i2] == i:
-			water += set_water(i2)
-	waterlist[i] = water
+	dirs = flow_dirs[x, y]
+
+	if dirs % 2 == 1:
+		water += set_water(x-1, y)
+	dirs //= 2
+	if dirs % 2 == 1:
+		water += set_water(x, y-1)
+	dirs //= 2
+	if dirs % 2 == 1:
+		water += set_water(x+1, y)
+	dirs //= 2
+	if dirs % 2 == 1:
+		water += set_water(x, y+1)
+	waterq[x, y] = water
 	return water
 
 maxwater = 0
 for start in start_points:
-	water = set_water(start[1])
+	water = set_water(start[1], start[2])
 	if water > maxwater:
 		maxwater = water
 
 print("Maximal water quantity:", str(maxwater))
 
-links = None
-
-print("Generating image data")
-
-contrast = simpledialog.askfloat("Contrast", "Contrast of the image:\nThe higher it is, the more visible are the small rivers.", initialvalue=3.0, parent=master, minvalue=0)
-
-depth = simpledialog.askinteger("Bit depth", "Bit depth of the river image:\nPossible values are 8, 16, 32, 64.", initialvalue=8, parent=master, minvalue=8, maxvalue=64)
-if depth <= 8:
-	depth = 8
-	typecode = "B"
-elif depth <= 16:
-	depth = 16
-	typecode = "H"
-elif depth <= 32:
-	depth = 32
-	typecode = "L"
-else:
-	depth = 64
-	typecode = "Q"
-
-maxvalue = 2 ** depth - 1
-power = 1 / contrast
-coeff = maxvalue / (maxwater ** power - 1)
-	
-rawdata = array(typecode)
-for i in range(size):
-	value = min(ceil((waterlist[i] ** power - 1) * coeff), maxvalue)
-	rawdata.append(value)
-
-waterlist = None
-
-print("Converting to bytes")
-
-rawdata = rawdata.tobytes()
+flow_dirs = None
 
 print("Generating image")
+if bit_depth <= 8:
+	bit_depth = 8
+	dtype = np.uint8
+elif bit_depth <= 16:
+	bit_depth = 16
+	dtype = np.uint16
+elif bit_depth <= 32:
+	bit_depth = 32
+	dtype = np.uint32
+else:
+	bit_depth = 64
+	dtype = np.uint64
 
-img = Image(blob=rawdata, width=W, height=H, format="gray", depth=depth)
-print("Converting image")
-img.convert("tiff")
-print("Asking output file")
-target = filedialog.asksaveasfilename(parent=master, defaultextension=".tif", title="Output image")
-print("Writing image")
-img.save(filename=target)
+maxvalue = 2 ** bit_depth - 1
+power = 1 / contrast
+coeff = maxvalue / (maxwater ** power)
+
+data = np.floor((waterq ** power) * coeff).astype(dtype)
+
+waterq = None
+
+imageio.imwrite(file_output, data)
