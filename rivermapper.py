@@ -13,8 +13,10 @@ i = 1
 n = 1
 sea_level = -128
 seed = None
-contrast = 3
+contrast = 4.
 bit_depth = 8
+draw_linewidth = False
+river_limit = 0
 while i < n_args:
 	arg = sys.argv[i]
 	if len(arg) == 0:
@@ -36,6 +38,11 @@ while i < n_args:
 			continue
 		if l == "d":
 			bit_depth = int(sys.argv[i+1])
+			i += 2
+			continue
+		if l == "w":
+			draw_linewidth = True
+			river_limit = int(sys.argv[i+1])
 			i += 2
 			continue
 		if l == "i":
@@ -189,24 +196,48 @@ print("Maximal water quantity:", str(maxwater))
 flow_dirs = None
 
 print("Generating image")
-if bit_depth <= 8:
-	bit_depth = 8
-	dtype = np.uint8
-elif bit_depth <= 16:
-	bit_depth = 16
-	dtype = np.uint16
-elif bit_depth <= 32:
-	bit_depth = 32
-	dtype = np.uint32
-else:
-	bit_depth = 64
-	dtype = np.uint64
 
-maxvalue = 2 ** bit_depth - 1
 power = 1 / contrast
-coeff = maxvalue / (maxwater ** power)
 
-data = np.floor((waterq ** power) * coeff).astype(dtype)
+if draw_linewidth:
+	bit_depth = 1
+	river_array = np.zeros((X, Y), dtype=bool)
+
+	for x in range(X):
+		for y in range(Y):
+			q = waterq[x,y]
+			if q >= river_limit:
+				rsize = int((q / river_limit)**power)
+				if rsize > 1:
+					rsize -= 1
+					xmin = max(x-rsize, 0)
+					xmax = min(x+rsize+1, X)
+					ymin = max(y-rsize, 0)
+					ymax = min(y+rsize+1,Y)
+					river_array[xmin:xmax,y] = True
+					river_array[x,ymin:ymax] = True
+				else:
+					river_array[x,y] = True
+	data = np.uint8(river_array * 255)
+
+else:
+	if bit_depth <= 8:
+		bit_depth = 8
+		dtype = np.uint8
+	elif bit_depth <= 16:
+		bit_depth = 16
+		dtype = np.uint16
+	elif bit_depth <= 32:
+		bit_depth = 32
+		dtype = np.uint32
+	else:
+		bit_depth = 64
+		dtype = np.uint64
+
+	maxvalue = 2 ** bit_depth - 1
+	coeff = maxvalue / (maxwater ** power)
+
+	data = np.floor((waterq ** power) * coeff).astype(dtype)
 
 waterq = None
 
